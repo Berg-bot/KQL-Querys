@@ -1,0 +1,68 @@
+DeviceEvents
+| where FileName in~ (
+    // ScreenConnect / ConnectWise Control
+    "ScreenConnect.ClientSetup.exe",
+    "ScreenConnect.ClientService.exe",
+    "ScreenConnect.WindowsClient.exe",
+    "ScreenConnectUpdater.exe",
+    "ScreenConnect.Service.exe",
+    "WindowsClient.exe",
+    // TeamViewer
+    "TeamViewer_Setup.exe",
+    "TeamViewer_Setup_x64.exe",
+    "TeamViewer.exe",
+    // AnyDesk
+    "AnyDesk.exe",
+    "AnyDesk_Setup.exe",
+    // LogMeIn
+    "LogMeIn.exe",
+    "wa_3rd_party_host_32.exe",
+    "wa_3rd_party_host_64.exe",
+    // RustDesk
+    "RustDesk.exe",
+    "RustDeskServer.Setup.exe"
+)
+| project 
+    Timestamp,
+    AccountName,
+    DeviceName,
+    FileName,
+    FolderPath,
+    SHA1,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    InitiatingProcessParentFileName,
+    ReportId
+| order by Timestamp desc
+
+__________________________________________________________________________________
+
+
+let RemoteAccessNames = dynamic(["screenconnect","screenconnect.client","teamviewer","anydesk","logmein","rustdesk"]);
+DeviceNetworkEvents
+| where tolower(InitiatingProcessFileName) has_any (RemoteAccessNames)
+| where RemoteIPType == "Public"     // external destination
+// exclude common enterprise management IPs (replace for the real allowlist)
+| where RemoteIP !in ("10.0.0.0","192.168.0.0") 
+| project Timestamp, DeviceName, InitiatingProcessFileName, InitiatingProcessSHA1, InitiatingProcessFolderPath, InitiatingProcessCommandLine, RemoteIP, RemotePort, RemoteUrl, RemoteIPType, ReportId
+| order by Timestamp desc
+
+__________________________________________________________________________________
+
+((((Correlate file seen on device with email attachment (phishing dropper detection))))
+
+
+// join DeviceFileEvents (files created/executed) to EmailAttachmentInfo by SHA256
+let window = 7d;
+DeviceFileEvents
+| where Timestamp >= ago(window)
+| where tolower(FileName) has_any ("teamviewer","anydesk","screenconnect","logmein","rustdesk")
+| project FileSha256 = SHA256, DeviceFile_Timestamp = Timestamp, DeviceName, AccountName, FileName, FolderPath, ReportId
+| join kind=inner (
+    EmailAttachmentInfo
+    | where Timestamp >= ago(window)
+    | project EmailSha256 = SHA256, Email_Timestamp = Timestamp, NetworkMessageId, SenderFromAddress, RecipientEmailAddress, FileName, ThreatTypes, ThreatNames
+) on $left.FileSha256 == $right.EmailSha256
+| extend TimeDelta_minutes = datetime_diff("minute", DeviceFile_Timestamp, Email_Timestamp)
+| project DeviceName, DeviceFile_Timestamp, FileName = FileName, FolderPath, NetworkMessageId, SenderFromAddress, RecipientEmailAddress, ThreatTypes, ThreatNames, TimeDelta_minutes
+| order by DeviceFile_Timestamp desc
