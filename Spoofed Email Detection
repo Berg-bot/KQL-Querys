@@ -1,0 +1,6 @@
+EmailEvents
+| where SenderFromAddress == RecipientEmailAddress
+// | where AuthenticationDetails has "spf=fail" or AuthenticationDetails has "dmarc=fail"
+// | where Subject has_any ("DARF", "Invoice", "Payment", "Tax") // Optional: filter for financial lures
+| project Timestamp, SenderFromAddress, RecipientEmailAddress, Subject, AuthenticationDetails, NetworkMessageId, DeliveryAction, ThreatTypes
+| order by Timestamp desc        
