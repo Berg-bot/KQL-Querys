@@ -45,7 +45,7 @@ DeviceFileEvents
     by DeviceName, FileName, FolderPath, SenderFromAddress, RecipientEmailAddress, ThreatTypes, ThreatNames
 | order by LastSeen desc
 
-##################
+#######################
 
 DeviceFileEvents: Collects files created or executed on endpoints, including their SHA256 hash.
 EmailAttachmentInfo: Collects email attachments and their SHA256 hash.
@@ -53,7 +53,8 @@ Join on SHA256: The query compares $left.FileSha256 (from the device) with $righ
 If they match, it means the file seen on the device is identical to an attachment from an email.
 Time correlation: It checks how close the file event was to the email timestamp (e.g., within 6 hours or 24 hours).
 
-##################
+#######################
+
 ________________________________________________________________________________________________
 
 ##Suspicious parent/launcher (spawned by email clients, archive tools, or scripts)
