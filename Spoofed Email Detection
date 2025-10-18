@@ -4,3 +4,34 @@ EmailEvents
 // | where Subject has_any ("DARF", "Invoice", "Payment", "Tax") // Optional: filter for financial lures
 | project Timestamp, SenderFromAddress, RecipientEmailAddress, Subject, AuthenticationDetails, NetworkMessageId, DeliveryAction, ThreatTypes
 | order by Timestamp desc        
+
+_______________________________________________________________________________________________
+
+##Correlate file seen on device with email attachment (phishing dropper detection)
+
+
+// join DeviceFileEvents (files created/executed) to EmailAttachmentInfo by SHA256
+let window = 7d;
+DeviceFileEvents
+| where Timestamp >= ago(window)
+| where tolower(FileName) has_any ("teamviewer","anydesk","screenconnect","logmein","rustdesk")
+| project FileSha256 = SHA256, DeviceFile_Timestamp = Timestamp, DeviceName, AccountName, FileName, FolderPath, ReportId
+| join kind=inner (
+    EmailAttachmentInfo
+    | where Timestamp >= ago(window)
+    | project EmailSha256 = SHA256, Email_Timestamp = Timestamp, NetworkMessageId, SenderFromAddress, RecipientEmailAddress, FileName, ThreatTypes, ThreatNames
+) on $left.FileSha256 == $right.EmailSha256
+| extend TimeDelta_minutes = datetime_diff("minute", DeviceFile_Timestamp, Email_Timestamp)
+| project DeviceName, DeviceFile_Timestamp, FileName = FileName, FolderPath, NetworkMessageId, SenderFromAddress, RecipientEmailAddress, ThreatTypes, ThreatNames, TimeDelta_minutes
+| order by DeviceFile_Timestamp desc
+
+________________________________________________________________________________________________
+
+##Suspicious parent/launcher (spawned by email clients, archive tools, or scripts)
+
+let suspiciousParents = dynamic(["outlook.exe","word.exe","excel.exe","winword.exe","powershell.exe","cmd.exe","rundll32.exe","wscript.exe","winrar.exe","7zfm.exe"]);
+DeviceEvents
+| where tolower(InitiatingProcessParentFileName) in (suspiciousParents)
+| where tolower(FileName) has_any ("teamviewer","anydesk","screenconnect","logmein","rustdesk")
+| project Timestamp, DeviceName, AccountName, FileName, FolderPath, SHA1, InitiatingProcessFileName, InitiatingProcessParentFileName, InitiatingProcessCommandLine, ProcessCreationTime, ReportId
+| order by Timestamp desc
