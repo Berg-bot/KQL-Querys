@@ -9,22 +9,51 @@ ________________________________________________________________________________
 
 ##Correlate file seen on device with email attachment (phishing dropper detection)
 
-
-// join DeviceFileEvents (files created/executed) to EmailAttachmentInfo by SHA256
 let window = 7d;
+let suspiciousTools = dynamic(["screenconnect", "teamviewer", "anydesk", "logmein", "rustdesk"]);
 DeviceFileEvents
 | where Timestamp >= ago(window)
-| where tolower(FileName) has_any ("teamviewer","anydesk","screenconnect","logmein","rustdesk")
-| project FileSha256 = SHA256, DeviceFile_Timestamp = Timestamp, DeviceName, AccountName, FileName, FolderPath, ReportId
+| where FileName endswith ".exe"
+| where tolower(FileName) has_any (suspiciousTools)
+| where FolderPath has_any ("Users", "Downloads", "Temp")  // Focus on user directories
+| project FileSha256 = SHA256, DeviceFile_Timestamp = Timestamp, DeviceName, FileName, FolderPath
 | join kind=inner (
     EmailAttachmentInfo
     | where Timestamp >= ago(window)
-    | project EmailSha256 = SHA256, Email_Timestamp = Timestamp, NetworkMessageId, SenderFromAddress, RecipientEmailAddress, FileName, ThreatTypes, ThreatNames
+    | where SenderFromAddress !contains "@neweratech.com" and SenderFromAddress !contains "@greenlightwiring.com"and SenderFromAddress !contains "@biamp.com" // Exclude legit sender domains
+    | project EmailSha256 = SHA256, Email_Timestamp = Timestamp, NetworkMessageId, SenderFromAddress, RecipientEmailAddress, ThreatTypes, ThreatNames
 ) on $left.FileSha256 == $right.EmailSha256
 | extend TimeDelta_minutes = datetime_diff("minute", DeviceFile_Timestamp, Email_Timestamp)
-| project DeviceName, DeviceFile_Timestamp, FileName = FileName, FolderPath, NetworkMessageId, SenderFromAddress, RecipientEmailAddress, ThreatTypes, ThreatNames, TimeDelta_minutes
+| where abs(TimeDelta_minutes) < 1440  // Only show events within 24h of email
+| project 
+    DeviceName,
+    FileName,
+    FolderPath,
+    DeviceFile_Timestamp,
+    Email_Timestamp,
+    TimeDelta_minutes,
+    SenderFromAddress,
+    RecipientEmailAddress,
+    ThreatTypes,
+    ThreatNames,
+    NetworkMessageId
 | order by DeviceFile_Timestamp desc
+| summarize 
+    EmailCount = count(),
+    FirstSeen = min(DeviceFile_Timestamp),
+    LastSeen = max(DeviceFile_Timestamp)
+    by DeviceName, FileName, FolderPath, SenderFromAddress, RecipientEmailAddress, ThreatTypes, ThreatNames
+| order by LastSeen desc
 
+##################
+
+DeviceFileEvents: Collects files created or executed on endpoints, including their SHA256 hash.
+EmailAttachmentInfo: Collects email attachments and their SHA256 hash.
+Join on SHA256: The query compares $left.FileSha256 (from the device) with $right.EmailSha256 (from the email).
+If they match, it means the file seen on the device is identical to an attachment from an email.
+Time correlation: It checks how close the file event was to the email timestamp (e.g., within 6 hours or 24 hours).
+
+##################
 ________________________________________________________________________________________________
 
 ##Suspicious parent/launcher (spawned by email clients, archive tools, or scripts)
