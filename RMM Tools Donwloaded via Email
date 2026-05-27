@@ -1,0 +1,11 @@
+let window = 30d;
+let suspiciousTools = dynamic(["screenconnect","teamviewer","anydesk","logmein","rustdesk","connectwise","useragent"]);
+DeviceFileEvents
+| where Timestamp >= ago(window)
+| where FileName endswith ".exe"
+| where FolderPath has_any ("Downloads","Temp","INetCache","Content.Outlook")
+| where FileName endswith ".exe"
+| where InitiatingProcessFileName has_any ("outlook.exe")  // came from email
+| where tolower(FileName) has_any (suspiciousTools) or tolower(InitiatingProcessCommandLine) has_any (suspiciousTools)
+| project DeviceName, FileName, FolderPath, DeviceFile_Timestamp = Timestamp, InitiatingProcessFileName, InitiatingProcessCommandLine
+| order by DeviceFile_Timestamp desc
